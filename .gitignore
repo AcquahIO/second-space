@@ -7,6 +7,9 @@ coverage
 .env
 .env.local
 *.log
+*.tsbuildinfo
 .DS_Store
 prisma/migrations
 apps/web/prisma/migrations
+packages/*/src/*.js
+packages/*/src/*.d.ts
