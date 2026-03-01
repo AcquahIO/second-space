@@ -1,18 +1,22 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import type { PresentationTokenPayload, SessionTokenPayload } from "@second-space/shared-types";
+import {
+  createPresentationToken,
+  createSignedToken,
+  verifyPresentationToken,
+  verifySignedToken
+} from "@second-space/shared-types/token-signing";
 import { getRuntimeEnv } from "@/lib/utils/runtime-env";
 
-export interface SessionPayload {
-  sub: string;
+export interface SessionPayload extends SessionTokenPayload {
   email: string;
   role: string;
   workspaceId: string;
-  exp: number;
 }
 
 const SESSION_COOKIE = "second_space_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
 
-function getSecret(): string {
+export function getSessionSecret(): string {
   const configuredSecret = getRuntimeEnv("SESSION_SECRET");
   if (configuredSecret) {
     return configuredSecret;
@@ -25,69 +29,33 @@ function getSecret(): string {
   throw new Error("SESSION_SECRET is required");
 }
 
-function b64url(input: string | Buffer): string {
-  return Buffer.from(input)
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-}
-
-function fromB64url(input: string): Buffer {
-  const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
-  const padding = "=".repeat((4 - (normalized.length % 4)) % 4);
-  return Buffer.from(`${normalized}${padding}`, "base64");
-}
-
-function sign(payload: string): string {
-  return b64url(createHmac("sha256", getSecret()).update(payload).digest());
-}
-
 export function createSessionToken(payload: Omit<SessionPayload, "exp">): string {
   const fullPayload: SessionPayload = {
     ...payload,
     exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS
   };
 
-  const encodedPayload = b64url(JSON.stringify(fullPayload));
-  const signature = sign(encodedPayload);
-  return `${encodedPayload}.${signature}`;
+  return createSignedToken<SessionPayload>(fullPayload, getSessionSecret());
 }
 
 export function verifySessionToken(token: string | undefined): SessionPayload | null {
-  if (!token) {
+  const payload = verifySignedToken<SessionPayload>(token, getSessionSecret());
+  if (!payload?.workspaceId || !payload.email || !payload.role) {
     return null;
   }
 
-  const [encodedPayload, signature] = token.split(".");
-  if (!encodedPayload || !signature) {
-    return null;
-  }
+  return payload;
+}
 
-  const expected = sign(encodedPayload);
+export function createWorkspacePresentationToken(input: Omit<PresentationTokenPayload, "exp">): {
+  token: string;
+  expiresAt: string;
+} {
+  return createPresentationToken(input, getSessionSecret());
+}
 
-  try {
-    const sigBuffer = Buffer.from(signature);
-    const expectedBuffer = Buffer.from(expected);
-
-    if (sigBuffer.length !== expectedBuffer.length || !timingSafeEqual(sigBuffer, expectedBuffer)) {
-      return null;
-    }
-
-    const payload = JSON.parse(fromB64url(encodedPayload).toString("utf8")) as SessionPayload;
-
-    if (payload.exp < Math.floor(Date.now() / 1000)) {
-      return null;
-    }
-
-    if (!payload.workspaceId) {
-      return null;
-    }
-
-    return payload;
-  } catch {
-    return null;
-  }
+export function verifyWorkspacePresentationToken(token: string | undefined): PresentationTokenPayload | null {
+  return verifyPresentationToken(token, getSessionSecret());
 }
 
 export function getSessionCookieName(): string {

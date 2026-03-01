@@ -262,6 +262,7 @@ export async function POST(request: NextRequest) {
     });
 
     await publishRealtimeEvent("feed.event", {
+      workspaceId: session.workspaceId,
       id: `${task.id}:chat:${message.id}`,
       message: `Operator pinged ${message.recipientAgent?.name ?? task.assignee.name} on ${task.title}`,
       category: "TASK",

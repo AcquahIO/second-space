@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { createCommandDraft } from "@/lib/orchestration/service";
 import { getRuntimeEnv } from "@/lib/utils/runtime-env";
-import { AGENT_CONTRACTS, type CommandMode } from "@second-space/shared-types";
+import { AGENT_CONTRACTS, type CommandMode, type WorkspaceActionHint } from "@second-space/shared-types";
 import { buildFallbackPmTurn } from "./fallback";
 import { buildWorkspaceSetupGuidance } from "@/lib/agent-chat/access-guidance";
 import { buildWorkspaceAwareness } from "@/lib/agent-chat/workspace-awareness";
@@ -29,6 +29,7 @@ export interface PmConversationTurn {
   reply: string;
   readyToExecute: boolean;
   draftId: string | null;
+  actionHints: WorkspaceActionHint[];
 }
 
 function getOpenAIClient(config: { apiKey: string } | null): OpenAI | null {
@@ -94,6 +95,7 @@ async function runModelConversationTurn(
   readyToExecute: boolean;
   mode: CommandMode;
   normalizedCommand: string;
+  actionHints: WorkspaceActionHint[];
 }> {
   const pmContract = AGENT_CONTRACTS.PROJECT_MANAGER;
   const openaiConfig = await resolveOpenAIConfig(workspaceId);
@@ -104,7 +106,8 @@ async function runModelConversationTurn(
       reply: "Tell me what you want to get done, and I’ll help shape it into something the team can run.",
       readyToExecute: false,
       mode: "explore",
-      normalizedCommand: "Clarify the mission objective and constraints."
+      normalizedCommand: "Clarify the mission objective and constraints.",
+      actionHints: []
     };
   }
 
@@ -112,10 +115,11 @@ async function runModelConversationTurn(
   const setupGuidance = buildWorkspaceSetupGuidance(operatorContext, workspaceAwareness);
   if (setupGuidance) {
     return {
-      reply: setupGuidance,
+      reply: setupGuidance.reply,
       readyToExecute: false,
       mode: "execute",
-      normalizedCommand: operatorContext
+      normalizedCommand: operatorContext,
+      actionHints: setupGuidance.actionHints
     };
   }
 
@@ -167,13 +171,13 @@ async function runModelConversationTurn(
     workspaceAwareness.userContextSummary,
     "",
     "[Output JSON schema]",
-    '{',
+    "{",
     '  "reply": "natural PM reply to the user",',
     '  "readyToExecute": true,',
     '  "mode": "explore|plan|execute|review",',
     '  "normalizedCommand": "clean internal mission brief",',
     '  "intentTitle": "short mission title"',
-    '}'
+    "}"
   ].join("\n");
 
   try {
@@ -197,7 +201,8 @@ async function runModelConversationTurn(
       reply: parsed.reply.trim(),
       readyToExecute: parsed.readyToExecute,
       mode: parsed.mode,
-      normalizedCommand: parsed.normalizedCommand.trim()
+      normalizedCommand: parsed.normalizedCommand.trim(),
+      actionHints: []
     };
   } catch {
     return buildFallbackPmTurn(operatorContext, { github: workspaceAwareness.github });
@@ -220,6 +225,7 @@ export async function createPmConversationTurn(
   return {
     reply: result.reply,
     readyToExecute: result.readyToExecute,
-    draftId
+    draftId,
+    actionHints: result.actionHints
   };
 }

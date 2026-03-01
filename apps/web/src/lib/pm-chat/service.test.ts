@@ -26,8 +26,9 @@ describe("buildFallbackPmTurn", () => {
       authStatus: "DISCONNECTED"
     });
 
-    expect(result).toContain("GitHub is not connected");
-    expect(result).toContain("Connect the GitHub integration");
+    expect(result?.reply).toContain("GitHub is not connected");
+    expect(result?.reply).toContain("Connect the GitHub integration");
+    expect(result?.actionHints.map((hint) => hint.type)).toContain("CONNECT_GITHUB");
   });
 
   it("tells the user to bind a repository when GitHub is connected without a repo", () => {
@@ -39,6 +40,7 @@ describe("buildFallbackPmTurn", () => {
       authStatus: "CONNECTED"
     });
 
-    expect(result).toContain("no repository is bound yet");
+    expect(result?.reply).toContain("no repository is bound yet");
+    expect(result?.actionHints.map((hint) => hint.type)).toContain("BIND_GITHUB_REPO");
   });
 });

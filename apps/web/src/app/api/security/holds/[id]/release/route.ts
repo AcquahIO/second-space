@@ -82,6 +82,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     });
 
     await publishRealtimeEvent("feed.event", {
+      workspaceId: updated.workspaceId,
       id: `${updated.id}:security-hold-release`,
       message: `Security hold released (${updated.scope})`,
       category: "APPROVAL",

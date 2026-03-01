@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { WorkspaceSceneAgent } from "@second-space/shared-types";
 import {
   buildSceneSummary,
+  buildZoneOccupancy,
   mapAgentStateToStatusTone,
   parseSceneInclude,
   parseSceneView,
@@ -47,6 +48,23 @@ describe("workspace-scene-helpers", () => {
       workingCount: 1,
       approvalCount: 2,
       activeHoldCount: 1
+    });
+  });
+
+  it("builds zone occupancy from agent placement", () => {
+    const occupancy = buildZoneOccupancy([
+      { id: "a1", zone: "meetingRoom", state: "MEETING" },
+      { id: "a2", zone: "meetingRoom", state: "BLOCKED" },
+      { id: "a3", zone: "lobby", state: "IDLE" }
+    ]);
+
+    expect(occupancy.find((entry) => entry.zone === "meetingRoom")).toEqual({
+      zone: "meetingRoom",
+      count: 2,
+      agentIds: ["a1", "a2"],
+      blockedCount: 1,
+      workingCount: 0,
+      meetingCount: 1
     });
   });
 });

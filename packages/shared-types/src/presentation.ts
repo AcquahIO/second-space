@@ -10,6 +10,9 @@ import type {
   WorkspaceSubscriptionStatus
 } from "./domain";
 
+export const PRESENTATION_CHANNELS = ["dashboard", "presentation"] as const;
+export type PresentationChannel = (typeof PRESENTATION_CHANNELS)[number];
+
 export const WORKSPACE_SCENE_VIEWS = ["office", "overview"] as const;
 export type WorkspaceSceneView = (typeof WORKSPACE_SCENE_VIEWS)[number];
 
@@ -58,6 +61,15 @@ export interface WorkspaceSceneAgent {
   simPosition: WorkspaceSceneWaypoint | null;
   zone: WorkspaceSceneZone;
   badge: WorkspaceSceneBadge;
+}
+
+export interface WorkspaceSceneZoneOccupancy {
+  zone: WorkspaceSceneZone;
+  count: number;
+  agentIds: string[];
+  blockedCount: number;
+  workingCount: number;
+  meetingCount: number;
 }
 
 export interface WorkspaceSceneSummary {
@@ -146,10 +158,12 @@ export interface WorkspaceSceneWorkspace {
 }
 
 export interface WorkspaceScene {
+  version: "v1";
   view: WorkspaceSceneView;
   cameraPreset: string;
   generatedAt: string;
   waypoints: WorkspaceSceneWaypoints;
+  zoneOccupancy: WorkspaceSceneZoneOccupancy[];
 }
 
 export interface WorkspaceSceneResponse {
@@ -163,4 +177,28 @@ export interface WorkspaceSceneResponse {
   feed?: WorkspaceSceneFeedItem[];
   approvals?: WorkspaceSceneApprovalSummary[];
   holds?: WorkspaceSceneHoldSummary[];
+}
+
+export interface PresentationScenePatch {
+  scene?: Pick<WorkspaceScene, "generatedAt" | "zoneOccupancy">;
+  summary?: WorkspaceSceneSummary;
+  agents?: WorkspaceSceneAgent[];
+  selectedAgent?: WorkspaceSceneSelectedAgent | null;
+  integrations?: WorkspaceSceneIntegrations;
+  tasks?: WorkspaceSceneTaskSummary[];
+  feed?: WorkspaceSceneFeedItem[];
+  approvals?: WorkspaceSceneApprovalSummary[];
+  holds?: WorkspaceSceneHoldSummary[];
+}
+
+export interface PresentationSceneEventPayload {
+  workspaceId: string;
+  channel: PresentationChannel;
+  changes: PresentationScenePatch;
+}
+
+export interface PresentationSceneEvent {
+  type: "presentation.scene.patch";
+  payload: PresentationSceneEventPayload;
+  emittedAt: string;
 }

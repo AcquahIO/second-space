@@ -34,6 +34,14 @@ Second Space is a simulation-first SaaS control room where a founder onboards a 
   - Manual notes
   - Chunking + optional embeddings
 - Natural-language schedule parsing and recurring mission triggers.
+- Mission Control presentation surface:
+  - `GET /api/presentation/workspace-scene`
+  - `POST /api/presentation/session`
+  - authenticated websocket patches via `presentation.scene.patch`
+- Selected-agent chat:
+  - `POST /api/agent-chat`
+  - `POST /api/agent-chat/stream`
+  - inline workspace action hints for setup gaps such as GitHub connect/repo binding
 - Guardrails:
   - External/write actions require explicit approval.
   - GitHub direct pushes to default branches are blocked.
@@ -79,6 +87,12 @@ npm run dev
 - `npm run db:migrate`: push schema.
 - `npm run db:seed`: seed a workspace owner + 11-agent roster.
 
+## Mission Control presentation contract
+- Bootstrap Mission Control and future UE clients with `GET /api/presentation/workspace-scene`.
+- Mint a short-lived websocket token with `POST /api/presentation/session`.
+- Consume workspace-scoped realtime updates over websocket via `presentation.scene.patch`.
+- Use `POST /api/agent-chat/stream` for the ChatGPT-style selected-agent conversation surface.
+
 ## Key docs
 - `docs/architecture.md`
 - `docs/api-contract.md`
@@ -90,6 +104,7 @@ npm run dev
 - `docs/ue5-office-floor-plan.md`
 - `docs/ue5-integration-spec.md`
 - `docs/ue5-presentation-workspace-scene-api.md`
+- `docs/ue5-presentation-client-contract.md`
 - `docs/workspace-scene-implementation-plan.md`
 - `docs/ue5-asset-production-checklist.md`
 - `docs/ue5-sprint-0-kickoff.md`

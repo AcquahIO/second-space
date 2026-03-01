@@ -16,6 +16,7 @@ import { prisma } from "@/lib/db/prisma";
 import { listFeed } from "@/lib/orchestration/service";
 import {
   buildSceneSummary,
+  buildZoneOccupancy,
   getSceneBadgeLabel,
   mapAgentStateToStatusTone,
   resolveSceneZone
@@ -271,10 +272,12 @@ export async function buildWorkspaceScene(
       blockedByWorkspaceHold: Boolean(workspaceBlocked)
     },
     scene: {
+      version: "v1",
       view,
       cameraPreset: buildCameraPreset(view),
       generatedAt: new Date().toISOString(),
-      waypoints: { ...OFFICE_WAYPOINTS }
+      waypoints: { ...OFFICE_WAYPOINTS },
+      zoneOccupancy: buildZoneOccupancy(agents)
     },
     summary: buildSceneSummary(agents, pendingApprovalCount, activeHoldCount),
     agents,

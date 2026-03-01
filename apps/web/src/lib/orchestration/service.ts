@@ -272,6 +272,7 @@ export async function confirmCommandDraft(workspaceId: string, commandId: string
 
   for (const task of created) {
     await publishRealtimeEvent("task.created", {
+      workspaceId,
       taskId: task.id,
       status: task.status,
       assigneeId: task.assigneeId,
@@ -279,6 +280,7 @@ export async function confirmCommandDraft(workspaceId: string, commandId: string
     });
 
     await publishRealtimeEvent("feed.event", {
+      workspaceId,
       id: `${task.id}:created`,
       message: `Task created: ${task.title}`,
       category: "TASK",
@@ -289,6 +291,7 @@ export async function confirmCommandDraft(workspaceId: string, commandId: string
       await getTaskQueue().add("execute-task", { taskId: task.id });
     } else {
       await publishRealtimeEvent("approval.requested", {
+        workspaceId,
         approvalId: task.approvalId ?? `task:${task.id}`,
         taskId: task.id,
         status: "PENDING"
@@ -379,6 +382,7 @@ export async function handoffTask(workspaceId: string, taskId: string, toAgentId
   });
 
   await publishRealtimeEvent("task.handoff.requested", {
+    workspaceId,
     taskId,
     fromAgentId: task.assigneeId,
     toAgentId,
@@ -386,6 +390,7 @@ export async function handoffTask(workspaceId: string, taskId: string, toAgentId
   });
 
   await publishRealtimeEvent("feed.event", {
+    workspaceId,
     id: `${taskId}:handoff:${Date.now()}`,
     message: `Task handoff requested: ${reason}`,
     category: "TASK",
@@ -393,6 +398,7 @@ export async function handoffTask(workspaceId: string, taskId: string, toAgentId
   });
 
   await publishRealtimeEvent("task.updated", {
+    workspaceId,
     taskId,
     status: updated.status,
     assigneeId: updated.assigneeId,
@@ -490,12 +496,14 @@ export async function approveTask(workspaceId: string, taskId: string, userId: s
   });
 
   await publishRealtimeEvent("approval.resolved", {
+    workspaceId,
     approvalId: approval.id,
     taskId,
     status: "APPROVED"
   });
 
   await publishRealtimeEvent("feed.event", {
+    workspaceId,
     id: `${approval.id}:approved`,
     message: `Approval accepted for task ${task.title}`,
     category: "APPROVAL",
@@ -503,6 +511,7 @@ export async function approveTask(workspaceId: string, taskId: string, userId: s
   });
 
   await publishRealtimeEvent("task.updated", {
+    workspaceId,
     taskId,
     status: "IN_PROGRESS",
     assigneeId: task.assigneeId,
@@ -589,12 +598,14 @@ export async function rejectTask(workspaceId: string, taskId: string, userId: st
   });
 
   await publishRealtimeEvent("approval.resolved", {
+    workspaceId,
     approvalId: approval.id,
     taskId,
     status: "REJECTED"
   });
 
   await publishRealtimeEvent("feed.event", {
+    workspaceId,
     id: `${approval.id}:rejected`,
     message: `Approval rejected for task ${task.title}`,
     category: "APPROVAL",
@@ -602,6 +613,7 @@ export async function rejectTask(workspaceId: string, taskId: string, userId: st
   });
 
   await publishRealtimeEvent("task.updated", {
+    workspaceId,
     taskId,
     status: "BLOCKED",
     assigneeId: task.assigneeId,

@@ -12,9 +12,24 @@
     "isolatedModules": true,
     "baseUrl": ".",
     "paths": {
-      "@second-space/shared-types": ["packages/shared-types/src"],
-      "@second-space/sim-engine": ["packages/sim-engine/src"],
-      "@second-space/tool-adapters": ["packages/tool-adapters/src"]
+      "@second-space/shared-types": [
+        "packages/shared-types/src"
+      ],
+      "@second-space/sim-engine": [
+        "packages/sim-engine/src"
+      ],
+      "@second-space/tool-adapters": [
+        "packages/tool-adapters/src"
+      ],
+      "@second-space/shared-types/*": [
+        "packages/shared-types/src/*"
+      ],
+      "@second-space/sim-engine/*": [
+        "packages/sim-engine/src/*"
+      ],
+      "@second-space/tool-adapters/*": [
+        "packages/tool-adapters/src/*"
+      ]
     }
   }
 }

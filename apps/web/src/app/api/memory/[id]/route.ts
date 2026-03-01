@@ -52,6 +52,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     });
 
     await publishRealtimeEvent("feed.event", {
+      workspaceId: existing.workspaceId,
       id: `${memoryId}:memory-deleted`,
       message: `Memory removed for ${existing.agent.name}`,
       category: "SYSTEM",

@@ -2,18 +2,53 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "baseUrl": ".",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "module": "esnext",
     "moduleResolution": "bundler",
     "allowJs": false,
     "noEmit": true,
     "jsx": "preserve",
     "incremental": true,
-    "plugins": [{ "name": "next" }],
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": [
+        "./src/*"
+      ],
+      "@second-space/shared-types": [
+        "../../packages/shared-types/src"
+      ],
+      "@second-space/shared-types/*": [
+        "../../packages/shared-types/src/*"
+      ],
+      "@second-space/sim-engine": [
+        "../../packages/sim-engine/src"
+      ],
+      "@second-space/sim-engine/*": [
+        "../../packages/sim-engine/src/*"
+      ],
+      "@second-space/tool-adapters": [
+        "../../packages/tool-adapters/src"
+      ],
+      "@second-space/tool-adapters/*": [
+        "../../packages/tool-adapters/src/*"
+      ]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }

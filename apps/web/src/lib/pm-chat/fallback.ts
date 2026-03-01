@@ -1,3 +1,4 @@
+import type { WorkspaceActionHint } from "@second-space/shared-types";
 import { parseCommandText } from "../commands/parser";
 import type { CommandMode } from "@second-space/shared-types";
 import { buildGithubAccessGuidance, type GithubWorkspaceContext } from "../agent-chat/access-guidance";
@@ -9,6 +10,7 @@ export interface FallbackPmTurn {
   readyToExecute: boolean;
   mode: CommandMode;
   normalizedCommand: string;
+  actionHints: WorkspaceActionHint[];
 }
 
 export function buildFallbackPmTurn(
@@ -20,10 +22,11 @@ export function buildFallbackPmTurn(
   const githubGuidance = buildGithubAccessGuidance(rawOperatorContext, options?.github);
   if (githubGuidance) {
     return {
-      reply: githubGuidance,
+      reply: githubGuidance.reply,
       readyToExecute: false,
       mode: "execute",
-      normalizedCommand: rawOperatorContext
+      normalizedCommand: rawOperatorContext,
+      actionHints: githubGuidance.actionHints
     };
   }
 
@@ -40,7 +43,8 @@ export function buildFallbackPmTurn(
       reply,
       readyToExecute: false,
       mode: parsed.mode,
-      normalizedCommand: rawOperatorContext
+      normalizedCommand: rawOperatorContext,
+      actionHints: []
     };
   }
 
@@ -48,6 +52,7 @@ export function buildFallbackPmTurn(
     reply: "I understand what you want. I’m ready to start and delegate this when you press Go.",
     readyToExecute: true,
     mode: parsed.mode,
-    normalizedCommand: rawOperatorContext
+    normalizedCommand: rawOperatorContext,
+    actionHints: []
   };
 }

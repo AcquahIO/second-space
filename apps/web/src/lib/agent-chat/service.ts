@@ -3,8 +3,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { createPmConversationTurn, type PmConversationMessage } from "@/lib/pm-chat/service";
 import { getRuntimeEnv } from "@/lib/utils/runtime-env";
-import { AGENT_CONTRACTS } from "@second-space/shared-types";
-import { buildFallbackAgentTurn, type FallbackAgentTurn } from "./fallback";
+import { AGENT_CONTRACTS, type WorkspaceActionHint } from "@second-space/shared-types";
+import { buildFallbackAgentTurn } from "./fallback";
 import { buildWorkspaceSetupGuidance } from "./access-guidance";
 import { buildWorkspaceAwareness, type WorkspaceAwarenessContext } from "./workspace-awareness";
 
@@ -21,6 +21,7 @@ export interface AgentConversationTurn {
   reply: string;
   readyToExecute: boolean;
   draftId: string | null;
+  actionHints: WorkspaceActionHint[];
 }
 
 function getOpenAIClient(config: { apiKey: string } | null): OpenAI | null {
@@ -186,7 +187,7 @@ async function runSpecialistConversationTurn(
   workspaceId: string,
   agent: WorkspaceAgentRecord,
   messages: AgentConversationMessage[]
-): Promise<FallbackAgentTurn> {
+): Promise<AgentConversationTurn> {
   const operatorContext = buildOperatorContext(messages);
   const openaiConfig = await resolveOpenAIConfig(workspaceId);
   const workspaceAwareness = await buildWorkspaceAwareness(workspaceId);
@@ -194,9 +195,10 @@ async function runSpecialistConversationTurn(
 
   if (setupGuidance) {
     return {
-      reply: setupGuidance,
+      reply: setupGuidance.reply,
       readyToExecute: false,
-      draftId: null
+      draftId: null,
+      actionHints: setupGuidance.actionHints
     };
   }
 
@@ -254,7 +256,8 @@ async function runSpecialistConversationTurn(
     return {
       reply,
       readyToExecute: false,
-      draftId: null
+      draftId: null,
+      actionHints: []
     };
   } catch {
     return buildFallbackAgentTurn({

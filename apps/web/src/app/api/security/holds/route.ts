@@ -118,6 +118,7 @@ export async function POST(request: NextRequest) {
     });
 
     await publishRealtimeEvent("feed.event", {
+      workspaceId: hold.workspaceId,
       id: `${hold.id}:security-hold`,
       message: `Security hold placed (${hold.scope}): ${hold.reason}`,
       category: "APPROVAL",

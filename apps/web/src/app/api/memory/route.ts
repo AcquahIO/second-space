@@ -93,6 +93,7 @@ export async function POST(request: NextRequest) {
     });
 
     await publishRealtimeEvent("feed.event", {
+      workspaceId: session.workspaceId,
       id: `${memory.id}:memory`,
       message: `Memory saved for ${agent.name}`,
       category: "SYSTEM",

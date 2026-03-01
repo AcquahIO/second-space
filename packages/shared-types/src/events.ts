@@ -1,4 +1,10 @@
-import type { AgentState, TaskStatus, WorkspaceOnboardingState, IntegrationProvider } from "./domain";
+import type {
+  AgentState,
+  TaskStatus,
+  WorkspaceOnboardingState,
+  IntegrationProvider
+} from "./domain";
+import type { PresentationSceneEventPayload } from "./presentation";
 
 export type RealtimeEventName =
   | "sim.agent.position.updated"
@@ -17,7 +23,8 @@ export type RealtimeEventName =
   | "security.hold.placed"
   | "security.hold.released"
   | "learning.proposal.created"
-  | "learning.proposal.resolved";
+  | "learning.proposal.resolved"
+  | "presentation.scene.patch";
 
 export interface RealtimeEvent<T = unknown> {
   type: RealtimeEventName;
@@ -26,17 +33,20 @@ export interface RealtimeEvent<T = unknown> {
 }
 
 export interface PositionPayload {
+  workspaceId?: string;
   agentId: string;
   x: number;
   y: number;
 }
 
 export interface AgentStatePayload {
+  workspaceId?: string;
   agentId: string;
   state: AgentState;
 }
 
 export interface TaskPayload {
+  workspaceId?: string;
   taskId: string;
   status: TaskStatus;
   assigneeId: string;
@@ -44,6 +54,7 @@ export interface TaskPayload {
 }
 
 export interface HandoffPayload {
+  workspaceId?: string;
   taskId: string;
   fromAgentId: string;
   toAgentId: string;
@@ -51,12 +62,14 @@ export interface HandoffPayload {
 }
 
 export interface ApprovalPayload {
+  workspaceId?: string;
   approvalId: string;
   taskId: string;
   status: "PENDING" | "APPROVED" | "REJECTED";
 }
 
 export interface FeedPayload {
+  workspaceId?: string;
   id: string;
   message: string;
   category: "TASK" | "APPROVAL" | "SIM" | "SYSTEM";
@@ -112,3 +125,5 @@ export interface LearningProposalPayload {
   title: string;
   createdAt: string;
 }
+
+export type PresentationScenePatchPayload = PresentationSceneEventPayload;

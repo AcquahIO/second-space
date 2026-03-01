@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "dev": "turbo run dev --parallel",
-    "build": "turbo run build",
+    "build": "npm run build --workspace=@second-space/shared-types && npm run build --workspace=@second-space/sim-engine && npm run build --workspace=@second-space/tool-adapters && npm run build --workspace=@second-space/worker && npm run build --workspace=@second-space/web",
     "test": "turbo run test",
     "lint": "turbo run lint",
     "db:generate": "prisma generate",

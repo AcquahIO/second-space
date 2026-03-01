@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import type { WorkspaceSceneResponse } from "@second-space/shared-types";
-import OfficeSim from "@/components/OfficeSim";
-import { buildSceneSummary, resolveSceneZone } from "@/lib/presentation/workspace-scene-helpers";
+import MissionControlScreen from "@/components/mission-control/MissionControlScreen";
 
 interface Session {
   sub: string;
@@ -16,6 +15,7 @@ type Role = "DIRECTOR" | "MANAGER" | "SPECIALIST";
 type AgentState = "IDLE" | "MOVING" | "WORKING" | "MEETING" | "BLOCKED";
 type Mood = "FOCUSED" | "NEUTRAL" | "STRESSED";
 type TabId = "MISSION_CONTROL" | "KANBAN" | "TASKS" | "CHAT" | "ORG" | "MEMORY" | "GOVERNANCE";
+type GovernanceFocus = "integrations" | "knowledge" | null;
 
 interface Agent {
   id: string;
@@ -90,17 +90,6 @@ interface FeedItem {
   id: string;
   message: string;
   category: "TASK" | "APPROVAL" | "SIM" | "SYSTEM";
-  createdAt: string;
-}
-
-interface PendingMissionExecution {
-  draftId: string;
-}
-
-interface MissionChatMessage {
-  id: string;
-  role: "operator" | "assistant" | "system";
-  content: string;
   createdAt: string;
 }
 
@@ -210,28 +199,15 @@ interface AgentMemoryGroup {
   memories: AgentMemory[];
 }
 
-interface SceneIntegrationStatus {
-  provider: "GITHUB" | "LINKEDIN" | "GMAIL";
-  authStatus: "DISCONNECTED" | "CONNECTED" | "ERROR";
-  connected: boolean;
-  accountLabel: string | null;
-  repoFullName: string | null;
-  defaultBranch: string | null;
-}
-
-function isFeedItemPayload(payload: unknown): payload is FeedItem {
-  if (!payload || typeof payload !== "object") {
-    return false;
-  }
-
-  const maybeFeed = payload as Partial<FeedItem>;
-
-  return (
-    typeof maybeFeed.id === "string" &&
-    typeof maybeFeed.message === "string" &&
-    typeof maybeFeed.category === "string" &&
-    typeof maybeFeed.createdAt === "string"
-  );
+interface KnowledgeSourceItem {
+  id: string;
+  type: "FILE" | "URL" | "NOTE";
+  title: string;
+  sourceUrl?: string | null;
+  updatedAt: string;
+  _count?: {
+    chunks: number;
+  };
 }
 
 const TABS: Array<{ id: TabId; label: string }> = [
@@ -287,14 +263,6 @@ function getKanbanColumnId(status: string): KanbanColumnId {
   }
 
   return "BACKLOG";
-}
-
-function newMissionMessageId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-
-  return `mission-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function normalizeCriteriaValue(value: unknown): string[] {
@@ -354,40 +322,10 @@ function getTaskCriteria(task: Task): string[] {
   return ["Complete the requested deliverable with clear handoff notes."];
 }
 
-function buildAgentOpeningMessage(agent: Agent): string {
-  if (agent.specialistRole === "PROJECT_MANAGER") {
-    return "Tell me what you want to get done. I’ll help shape it, ask for the minimum context I need, and when it’s ready you can tell me to go.";
-  }
-
-  return `You’re talking to ${agent.name}. Ask me anything related to ${agent.specialty}, and I’ll respond directly from my role.`;
-}
-
-function dedupeMissionAgents(agents: Agent[]): Agent[] {
-  const bySpecialistRole = new Map<string, Agent>();
-
-  for (const agent of agents) {
-    const key = agent.specialistRole ?? agent.id;
-    const existing = bySpecialistRole.get(key);
-
-    if (!existing) {
-      bySpecialistRole.set(key, agent);
-      continue;
-    }
-
-    const agentScore = Number(agent.id.includes("_"));
-    const existingScore = Number(existing.id.includes("_"));
-
-    if (agentScore > existingScore) {
-      bySpecialistRole.set(key, agent);
-    }
-  }
-
-  return Array.from(bySpecialistRole.values());
-}
-
 export default function Dashboard({ session }: { session: Session }) {
   const [activeTab, setActiveTab] = useState<TabId>("MISSION_CONTROL");
   const [showManual, setShowManual] = useState(false);
+  const [governanceFocus, setGovernanceFocus] = useState<GovernanceFocus>(null);
 
   const [agents, setAgents] = useState<Agent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -401,10 +339,10 @@ export default function Dashboard({ session }: { session: Session }) {
 
   const [memoryGroups, setMemoryGroups] = useState<AgentMemoryGroup[]>([]);
   const [memoryDrafts, setMemoryDrafts] = useState<Record<string, string>>({});
+  const [knowledgeSources, setKnowledgeSources] = useState<KnowledgeSourceItem[]>([]);
+  const [knowledgeNoteTitle, setKnowledgeNoteTitle] = useState("Workspace note");
+  const [knowledgeNoteContent, setKnowledgeNoteContent] = useState("");
 
-  const [commandInput, setCommandInput] = useState("");
-  const [agentConversations, setAgentConversations] = useState<Record<string, MissionChatMessage[]>>({});
-  const [pendingExecutions, setPendingExecutions] = useState<Record<string, PendingMissionExecution | undefined>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -431,25 +369,11 @@ export default function Dashboard({ session }: { session: Session }) {
 
   const [learningProposals, setLearningProposals] = useState<LearningProposal[]>([]);
   const [reflectionRuns, setReflectionRuns] = useState<ReflectionRun[]>([]);
-  const [workspaceScene, setWorkspaceScene] = useState<WorkspaceSceneResponse | null>(null);
-
-  const [isRecording, setIsRecording] = useState(false);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const missionChatWindowRef = useRef<HTMLDivElement | null>(null);
-
-  const missionAgents = useMemo(() => dedupeMissionAgents(agents), [agents]);
+  const integrationsSectionRef = useRef<HTMLDivElement | null>(null);
+  const knowledgeSectionRef = useRef<HTMLDivElement | null>(null);
   const selectedAgent = useMemo(
-    () => missionAgents.find((agent) => agent.id === selectedAgentId) ?? agents.find((agent) => agent.id === selectedAgentId) ?? null,
-    [agents, missionAgents, selectedAgentId]
-  );
-  const activeMissionMessages = useMemo(
-    () => (selectedAgentId ? agentConversations[selectedAgentId] ?? [] : []),
-    [agentConversations, selectedAgentId]
-  );
-  const activePendingExecution = useMemo(
-    () => (selectedAgentId ? pendingExecutions[selectedAgentId] ?? null : null),
-    [pendingExecutions, selectedAgentId]
+    () => agents.find((agent) => agent.id === selectedAgentId) ?? null,
+    [agents, selectedAgentId]
   );
   const githubIntegration = useMemo(
     () => integrations.find((integration) => integration.provider === "GITHUB") ?? null,
@@ -463,59 +387,6 @@ export default function Dashboard({ session }: { session: Session }) {
 
     return chatThreads.find((thread) => thread.taskId === selectedThreadTaskId) ?? chatThreads[0];
   }, [chatThreads, selectedThreadTaskId]);
-
-  const missionStageAgents = useMemo(
-    () => workspaceScene?.agents ?? [],
-    [workspaceScene]
-  );
-
-  const selectedSceneAgent = workspaceScene?.selectedAgent ?? null;
-  const githubSceneIntegration = useMemo(
-    () => (workspaceScene?.integrations?.items ?? []).find((integration) => integration.provider === "GITHUB") ?? null,
-    [workspaceScene]
-  );
-
-  function describeGitHubReadiness(integration: SceneIntegrationStatus | null): string {
-    if (!integration) {
-      return "GitHub unknown";
-    }
-
-    if (integration.authStatus === "DISCONNECTED") {
-      return "GitHub disconnected";
-    }
-
-    if (integration.authStatus === "ERROR") {
-      return "GitHub error";
-    }
-
-    if (integration.repoFullName) {
-      return `GitHub ${integration.repoFullName}`;
-    }
-
-    return "GitHub connected, repo not bound";
-  }
-
-  async function refreshScene(nextSelectedAgentId?: string | null) {
-    const params = new URLSearchParams({
-      view: "office",
-      include: "feed,integrations,approvals,holds"
-    });
-
-    const targetSelectedAgentId = nextSelectedAgentId ?? selectedAgentId;
-    if (targetSelectedAgentId) {
-      params.set("selectedAgentId", targetSelectedAgentId);
-    }
-
-    const response = await fetch(`/api/presentation/workspace-scene?${params.toString()}`);
-    const payload = await response.json();
-
-    if (!response.ok) {
-      throw new Error(payload.error ?? "Failed to load workspace scene");
-    }
-
-    setWorkspaceScene(payload);
-    return payload as WorkspaceSceneResponse;
-  }
 
   const pendingApprovals = useMemo(
     () => tasks.filter((task) => task.approvals?.some((approval) => approval.status === "PENDING")),
@@ -565,23 +436,8 @@ export default function Dashboard({ session }: { session: Session }) {
     };
   }, [agents]);
 
-  function appendAgentMessage(agentId: string, role: MissionChatMessage["role"], content: string) {
-    setAgentConversations((current) => ({
-      ...current,
-      [agentId]: [
-        ...(current[agentId] ?? []),
-        {
-          id: newMissionMessageId(),
-          role,
-          content,
-          createdAt: new Date().toISOString()
-        }
-      ]
-    }));
-  }
-
   async function refreshAll() {
-    const [agentsRes, tasksRes, feedRes, toolsRes, sceneRes, chatRes, memoryRes, integrationsRes, holdsRes, userContextRes, proposalsRes, reflectionsRes] =
+    const [agentsRes, tasksRes, feedRes, toolsRes, sceneRes, chatRes, memoryRes, integrationsRes, holdsRes, userContextRes, proposalsRes, reflectionsRes, knowledgeRes] =
       await Promise.all([
       fetch("/api/agents"),
       fetch("/api/tasks"),
@@ -590,8 +446,7 @@ export default function Dashboard({ session }: { session: Session }) {
       fetch(
         `/api/presentation/workspace-scene?${new URLSearchParams({
           view: "office",
-          include: "feed,integrations,approvals,holds",
-          ...(selectedAgentId ? { selectedAgentId } : {})
+          include: "feed,integrations,approvals,holds"
         }).toString()}`
       ),
       fetch("/api/chat"),
@@ -600,7 +455,8 @@ export default function Dashboard({ session }: { session: Session }) {
       fetch("/api/security/holds"),
       fetch("/api/user-context"),
       fetch("/api/learning/proposals"),
-      fetch("/api/learning/reflections")
+      fetch("/api/learning/reflections"),
+      fetch("/api/knowledge/sources")
     ]);
 
     if (
@@ -615,7 +471,8 @@ export default function Dashboard({ session }: { session: Session }) {
       !holdsRes.ok ||
       !userContextRes.ok ||
       !proposalsRes.ok ||
-      !reflectionsRes.ok
+      !reflectionsRes.ok ||
+      !knowledgeRes.ok
     ) {
       throw new Error("Failed to load dashboard data");
     }
@@ -632,6 +489,7 @@ export default function Dashboard({ session }: { session: Session }) {
     const userContextData = await userContextRes.json();
     const proposalsData = await proposalsRes.json();
     const reflectionsData = await reflectionsRes.json();
+    const knowledgeData = await knowledgeRes.json();
 
     const sceneAgentMap = new Map(
       (sceneData.agents ?? []).map((agent) => [
@@ -659,8 +517,6 @@ export default function Dashboard({ session }: { session: Session }) {
 
     const nextThreads: ChatThread[] = chatData.threads ?? [];
     const nextTasks: Task[] = tasksData.tasks ?? [];
-    const nextMissionAgents = dedupeMissionAgents(nextAgents);
-
     setAgents(nextAgents);
     setTasks(nextTasks);
     setFeed(sceneData.feed ?? feedData.feed ?? []);
@@ -673,7 +529,7 @@ export default function Dashboard({ session }: { session: Session }) {
     setUserContexts(userContextData.contexts ?? []);
     setLearningProposals(proposalsData.proposals ?? []);
     setReflectionRuns(reflectionsData.runs ?? []);
-    setWorkspaceScene(sceneData);
+    setKnowledgeSources(knowledgeData.sources ?? []);
 
     const github = (integrationsData.integrations ?? []).find((integration: IntegrationRecord) => integration.provider === "GITHUB");
     const githubMeta =
@@ -701,12 +557,12 @@ export default function Dashboard({ session }: { session: Session }) {
     });
 
     setSelectedAgentId((current) => {
-      if (current && nextMissionAgents.some((agent: Agent) => agent.id === current)) {
+      if (current && nextAgents.some((agent: Agent) => agent.id === current)) {
         return current;
       }
 
-      const projectManager = nextMissionAgents.find((agent: Agent) => agent.specialistRole === "PROJECT_MANAGER");
-      return projectManager?.id ?? nextMissionAgents[0]?.id ?? null;
+      const projectManager = nextAgents.find((agent: Agent) => agent.specialistRole === "PROJECT_MANAGER");
+      return projectManager?.id ?? nextAgents[0]?.id ?? null;
     });
 
     setSelectedKanbanTaskId((current) => {
@@ -723,310 +579,13 @@ export default function Dashboard({ session }: { session: Session }) {
   }, []);
 
   useEffect(() => {
-    if (!selectedAgentId) {
+    if (activeTab !== "GOVERNANCE" || !governanceFocus) {
       return;
     }
 
-    void refreshScene(selectedAgentId).catch((loadError) => setError(loadError instanceof Error ? loadError.message : "Failed to load workspace scene"));
-  }, [selectedAgentId]);
-
-  useEffect(() => {
-    if (!selectedAgent) {
-      return;
-    }
-
-    setAgentConversations((current) => {
-      if (current[selectedAgent.id]?.length) {
-        return current;
-      }
-
-      return {
-        ...current,
-        [selectedAgent.id]: [
-          {
-            id: newMissionMessageId(),
-            role: "assistant",
-            content: buildAgentOpeningMessage(selectedAgent),
-            createdAt: new Date().toISOString()
-          }
-        ]
-      };
-    });
-  }, [selectedAgent]);
-
-  useEffect(() => {
-    if (!missionChatWindowRef.current) {
-      return;
-    }
-
-    missionChatWindowRef.current.scrollTop = missionChatWindowRef.current.scrollHeight;
-  }, [activeMissionMessages, activePendingExecution]);
-
-  useEffect(() => {
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:4001";
-    let ws: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let closed = false;
-
-    const connect = () => {
-      if (closed) {
-        return;
-      }
-
-      ws = new WebSocket(wsUrl);
-
-      ws.onmessage = (message) => {
-        try {
-          const event = JSON.parse(message.data as string) as {
-            type: string;
-            payload: Record<string, unknown>;
-          };
-
-          if (event.type === "sim.agent.position.updated") {
-            const agentId = String(event.payload.agentId);
-            const x = Number(event.payload.x);
-            const y = Number(event.payload.y);
-
-            setAgents((current) =>
-              current.map((agent) =>
-                agent.id === agentId
-                  ? {
-                      ...agent,
-                      simPosition: { x, y }
-                    }
-                  : agent
-              )
-            );
-            setWorkspaceScene((current) => {
-              if (!current) {
-                return current;
-              }
-
-              return {
-                ...current,
-                agents: current.agents.map((agent) =>
-                  agent.id === agentId ? { ...agent, simPosition: { x, y }, zone: resolveSceneZone(x, y) } : agent
-                ),
-                selectedAgent:
-                  current.selectedAgent?.id === agentId
-                    ? {
-                        ...current.selectedAgent,
-                        zone: resolveSceneZone(x, y)
-                      }
-                    : current.selectedAgent
-              };
-            });
-            return;
-          }
-
-          if (event.type === "sim.agent.state.updated") {
-            const agentId = String(event.payload.agentId);
-            const state = String(event.payload.state) as Agent["state"];
-            setAgents((current) => current.map((agent) => (agent.id === agentId ? { ...agent, state } : agent)));
-            setWorkspaceScene((current) => {
-              if (!current) {
-                return current;
-              }
-
-              const nextAgents = current.agents.map((agent) => (agent.id === agentId ? { ...agent, state } : agent));
-
-              return {
-                ...current,
-                agents: nextAgents,
-                summary: buildSceneSummary(nextAgents, current.summary.approvalCount, current.summary.activeHoldCount),
-                selectedAgent:
-                  current.selectedAgent?.id === agentId
-                    ? {
-                        ...current.selectedAgent,
-                        state
-                      }
-                    : current.selectedAgent
-              };
-            });
-            return;
-          }
-
-          if (event.type === "feed.event") {
-            const payload = event.payload;
-            if (isFeedItemPayload(payload)) {
-              setFeed((current) => [payload, ...current].slice(0, 120));
-              setWorkspaceScene((current) =>
-                current?.feed
-                  ? {
-                      ...current,
-                      feed: (() => {
-                        const sceneFeedItem: NonNullable<WorkspaceSceneResponse["feed"]>[number] = {
-                          id: payload.id,
-                          message: payload.message,
-                          category: payload.category === "TASK" ? "TASK" : "SYSTEM",
-                          createdAt: payload.createdAt
-                        };
-
-                        return [sceneFeedItem, ...current.feed].slice(0, 15);
-                      })()
-                    }
-                  : current
-              );
-            }
-          }
-
-          if (
-            [
-              "task.created",
-              "task.updated",
-              "approval.requested",
-              "approval.resolved",
-              "security.hold.placed",
-              "security.hold.released",
-              "learning.proposal.created",
-              "learning.proposal.resolved"
-            ].includes(event.type)
-          ) {
-            void refreshAll();
-          }
-        } catch {
-          // Ignore malformed realtime payloads.
-        }
-      };
-
-      ws.onclose = () => {
-        if (closed) {
-          return;
-        }
-        reconnectTimer = setTimeout(connect, 1500);
-      };
-
-      ws.onerror = () => {
-        // Connection failures are handled by onclose + reconnect scheduling.
-      };
-    };
-
-    connect();
-
-    return () => {
-      closed = true;
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-      }
-      ws?.close();
-    };
-  }, []);
-
-  async function submitCommand() {
-    if (!selectedAgentId || !commandInput.trim()) {
-      return;
-    }
-
-    const agentId = selectedAgentId;
-    const operatorText = commandInput.trim();
-    const operatorMessage: MissionChatMessage = {
-      id: newMissionMessageId(),
-      role: "operator",
-      content: operatorText,
-      createdAt: new Date().toISOString()
-    };
-    const nextMissionMessages = [...(agentConversations[agentId] ?? []), operatorMessage];
-    const requestMessages = nextMissionMessages.slice(-24);
-
-    setAgentConversations((current) => ({
-      ...current,
-      [agentId]: nextMissionMessages
-    }));
-    setPendingExecutions((current) => ({
-      ...current,
-      [agentId]: undefined
-    }));
-    setBusy(true);
-    setError(null);
-
-    try {
-      const response = await fetch("/api/agent-chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          agentId,
-          messages: requestMessages.map((message) => ({
-            role: message.role,
-            content: message.content
-          }))
-        })
-      });
-
-      const payload = await response.json();
-
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to get agent reply");
-      }
-
-      setPendingExecutions((current) => ({
-        ...current,
-        [agentId]: payload.readyToExecute && payload.draftId ? { draftId: String(payload.draftId) } : undefined
-      }));
-      appendAgentMessage(agentId, "assistant", String(payload.reply ?? "I’ve updated the mission context."));
-      setCommandInput("");
-    } catch (submitError) {
-      appendAgentMessage(
-        agentId,
-        "system",
-        submitError instanceof Error ? `Could not process that request: ${submitError.message}` : "Could not process that request."
-      );
-      setError(submitError instanceof Error ? submitError.message : "Failed to get agent reply");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function confirmDraft() {
-    if (!selectedAgentId || !activePendingExecution) {
-      return;
-    }
-
-    const agentId = selectedAgentId;
-    const draftToConfirm = activePendingExecution;
-    setBusy(true);
-    setError(null);
-
-    try {
-      const response = await fetch(`/api/commands/${draftToConfirm.draftId}/confirm`, {
-        method: "POST"
-      });
-
-      const payload = await response.json();
-
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to confirm draft");
-      }
-
-      const launched = Array.isArray(payload.tasks) ? payload.tasks.length : 0;
-      if (launched > 0) {
-        appendAgentMessage(
-          agentId,
-          "assistant",
-          `I’m starting now. I’ve opened ${launched} task${launched === 1 ? "" : "s"} and delegated the first wave of work to the team.`
-        );
-      } else {
-        appendAgentMessage(agentId, "assistant", "I’m on it. I’ve started the internal PM workflow and I’ll keep updating you here.");
-      }
-
-      setPendingExecutions((current) => ({
-        ...current,
-        [agentId]: undefined
-      }));
-      setCommandInput("");
-      await refreshAll();
-    } catch (confirmError) {
-      appendAgentMessage(
-        agentId,
-        "system",
-        confirmError instanceof Error ? `Execution failed: ${confirmError.message}` : "Execution failed."
-      );
-      setError(confirmError instanceof Error ? confirmError.message : "Failed to confirm draft");
-    } finally {
-      setBusy(false);
-    }
-  }
+    const target = governanceFocus === "knowledge" ? knowledgeSectionRef.current : integrationsSectionRef.current;
+    target?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [activeTab, governanceFocus]);
 
   async function approveTask(taskId: string) {
     setBusy(true);
@@ -1199,6 +758,93 @@ export default function Dashboard({ session }: { session: Session }) {
       await refreshAll();
     } catch (memoryError) {
       setError(memoryError instanceof Error ? memoryError.message : "Could not delete memory");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createKnowledgeNoteFromGovernance() {
+    if (!knowledgeNoteContent.trim()) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/knowledge/note", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          title: knowledgeNoteTitle.trim() || "Workspace note",
+          content: knowledgeNoteContent.trim()
+        })
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Could not add workspace note");
+      }
+
+      setKnowledgeNoteTitle("Workspace note");
+      setKnowledgeNoteContent("");
+      await refreshAll();
+    } catch (knowledgeError) {
+      setError(knowledgeError instanceof Error ? knowledgeError.message : "Could not add workspace note");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function uploadKnowledgeFileFromGovernance(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/knowledge/files", {
+        method: "POST",
+        body: formData
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Could not upload knowledge file");
+      }
+
+      await refreshAll();
+    } catch (knowledgeError) {
+      setError(knowledgeError instanceof Error ? knowledgeError.message : "Could not upload knowledge file");
+    } finally {
+      event.target.value = "";
+      setBusy(false);
+    }
+  }
+
+  async function deleteKnowledgeSource(sourceId: string) {
+    setBusy(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/knowledge/${sourceId}`, {
+        method: "DELETE"
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Could not delete knowledge source");
+      }
+
+      await refreshAll();
+    } catch (knowledgeError) {
+      setError(knowledgeError instanceof Error ? knowledgeError.message : "Could not delete knowledge source");
     } finally {
       setBusy(false);
     }
@@ -1539,68 +1185,6 @@ export default function Dashboard({ session }: { session: Session }) {
     }
   }
 
-  async function toggleRecording() {
-    if (isRecording) {
-      recorderRef.current?.stop();
-      setIsRecording(false);
-      return;
-    }
-
-    setError(null);
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-      chunksRef.current = [];
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.onstop = () => {
-        void (async () => {
-          try {
-            const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-            stream.getTracks().forEach((track) => track.stop());
-
-            if (!blob.size) {
-              return;
-            }
-
-            const formData = new FormData();
-            formData.append("audio", blob, "voice.webm");
-
-            const response = await fetch("/api/voice/transcribe", {
-              method: "POST",
-              body: formData
-            });
-
-            const payload = await response.json();
-
-            if (!response.ok) {
-              throw new Error(payload.error ?? "Transcription failed");
-            }
-
-            if (payload.text) {
-              setCommandInput((current) => (current ? `${current} ${payload.text}` : payload.text));
-            }
-          } catch (transcriptionError) {
-            setError(transcriptionError instanceof Error ? transcriptionError.message : "Transcription failed");
-          }
-        })();
-      };
-
-      recorderRef.current = recorder;
-      recorder.start();
-      setIsRecording(true);
-    } catch (recordError) {
-      setError(recordError instanceof Error ? recordError.message : "Voice capture failed");
-      setIsRecording(false);
-    }
-  }
-
   async function saveOpenAISettings() {
     setBusy(true);
     setError(null);
@@ -1661,7 +1245,10 @@ export default function Dashboard({ session }: { session: Session }) {
             <button
               key={tab.id}
               className={`menu-tab ${activeTab === tab.id ? "active" : ""}`}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => {
+                setGovernanceFocus(null);
+                setActiveTab(tab.id);
+              }}
               type="button"
             >
               {tab.label}
@@ -1698,135 +1285,12 @@ export default function Dashboard({ session }: { session: Session }) {
 
       <main className="dashboard-main">
         {activeTab === "MISSION_CONTROL" ? (
-          <section className="screen-grid mission-grid mission-grid-fixed">
-            <div className="panel-section sim-panel mission-sim-panel">
-              <div className="sim-caption">Minecraft-style Agent Office</div>
-              <div className="sim-card">
-                <OfficeSim agents={missionStageAgents} selectedAgentId={selectedAgentId} onSelectAgent={setSelectedAgentId} />
-              </div>
-              {workspaceScene ? (
-                <div className="mission-scene-summary">
-                  <span>{workspaceScene.summary.onlineAgents} agents live</span>
-                  <span>{workspaceScene.summary.approvalCount} approvals</span>
-                  <span>{workspaceScene.summary.activeHoldCount} holds</span>
-                  <span>{describeGitHubReadiness(githubSceneIntegration)}</span>
-                  {workspaceScene.workspace.blockedByWorkspaceHold ? <span>Workspace write-blocked</span> : null}
-                </div>
-              ) : null}
-              <div className="agent-chip-row">
-                {missionStageAgents.map((agent) => (
-                  <button
-                    className={`agent-chip ${selectedAgentId === agent.id ? "active" : ""}`}
-                    key={agent.id}
-                    onClick={() => setSelectedAgentId(agent.id)}
-                    type="button"
-                  >
-                    {agent.name.split(" ")[0]} {agent.state}
-                  </button>
-                ))}
-              </div>
-              <div className="mission-stage-footer">Agent Floor</div>
-            </div>
-
-            <div className="mission-right-column">
-              <div className="panel-section agent-chat-shell">
-                <div className="agent-chat-topbar">
-                  <div className="agent-chat-topline">
-                    <span className="agent-chat-eyebrow">Active Agent</span>
-                    <div className="agent-chat-selector-wrap">
-                      <select
-                        className="select agent-chat-selector"
-                        value={selectedAgentId ?? ""}
-                        onChange={(event) => setSelectedAgentId(event.target.value || null)}
-                      >
-                        {missionAgents.map((agent) => (
-                          <option key={agent.id} value={agent.id}>
-                            {agent.name} · {agent.specialistRole?.replaceAll("_", " ")}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  <div className="agent-chat-heading-row">
-                    <div>
-                      <h2>{selectedAgent ? `Talk to ${selectedAgent.name}` : "Talk to an Agent"}</h2>
-                      <p className="agent-chat-subtitle">
-                        {selectedAgent
-                          ? `${selectedSceneAgent?.summary ?? selectedAgent.specialty}. ${
-                              selectedAgent.specialistRole === "PROJECT_MANAGER"
-                                ? "When PM has enough context, Go will appear here."
-                                : "Use PM for cross-team execution and orchestration."
-                            }`
-                          : "Choose an agent, then chat naturally."}
-                      </p>
-                    </div>
-                    {selectedSceneAgent ? (
-                      <div className="agent-chat-kpis">
-                        <span>Zone {selectedSceneAgent.zone}</span>
-                        <span>{selectedSceneAgent.currentTaskCount} active tasks</span>
-                        <span>{selectedSceneAgent.blockedTaskCount} blocked</span>
-                      </div>
-                    ) : null}
-                  </div>
-                  {selectedSceneAgent?.latestFeedMessage ? (
-                    <div className="agent-chat-scene-note">{selectedSceneAgent.latestFeedMessage}</div>
-                  ) : null}
-                </div>
-
-                <div className="agent-chat-window" ref={missionChatWindowRef}>
-                  {selectedAgent ? (
-                    activeMissionMessages.map((message) => (
-                      <div className={`agent-chat-message ${message.role}`} key={message.id}>
-                        <div className="agent-chat-message-label">
-                          {message.role === "operator" ? "You" : message.role === "assistant" ? selectedAgent.name : "System"}
-                        </div>
-                        <div className="agent-chat-message-body">{message.content}</div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="agent-chat-empty">Select an agent to start chatting.</div>
-                  )}
-                </div>
-
-                <div className="agent-chat-composer-shell">
-                  {selectedAgent?.specialistRole === "PROJECT_MANAGER" && activePendingExecution ? (
-                    <div className="agent-chat-ready-banner">
-                      <span>PM has enough context. Press Go to start the mission.</span>
-                      <button className="btn btn-go" disabled={busy} onClick={confirmDraft} type="button">
-                        Go
-                      </button>
-                    </div>
-                  ) : null}
-
-                  <div className="agent-chat-composer">
-                    <textarea
-                      className="textarea agent-chat-input"
-                      disabled={!selectedAgent}
-                      placeholder={selectedAgent ? `Message ${selectedAgent.name}...` : "Select an agent first"}
-                      value={commandInput}
-                      onChange={(event) => setCommandInput(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" && !event.shiftKey) {
-                          event.preventDefault();
-                          if (!busy) {
-                            void submitCommand();
-                          }
-                        }
-                      }}
-                    />
-                    <div className="agent-chat-toolbar">
-                      <button className={`btn ${isRecording ? "btn-danger" : "btn-warn"}`} onClick={toggleRecording} type="button">
-                        {isRecording ? "Stop Voice" : "Voice"}
-                      </button>
-                      <button className="btn btn-accent" disabled={busy || !selectedAgent} onClick={submitCommand} type="button">
-                        Send
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
+          <MissionControlScreen
+            onOpenSettings={(target) => {
+              setGovernanceFocus(target);
+              setActiveTab("GOVERNANCE");
+            }}
+          />
         ) : null}
 
         {activeTab === "KANBAN" ? (
@@ -2276,7 +1740,22 @@ export default function Dashboard({ session }: { session: Session }) {
 
         {activeTab === "GOVERNANCE" ? (
           <section className="screen-grid governance-grid">
-            <div className="panel-section">
+            <div className="stack-column">
+              {governanceFocus ? (
+                <div className="panel-section governance-focus-banner">
+                  <h2>{governanceFocus === "integrations" ? "Integration Setup" : "Knowledge Setup"}</h2>
+                  <p>
+                    {governanceFocus === "integrations"
+                      ? "Mission Control sent you here to connect or bind the workspace tools the agents need."
+                      : "Mission Control sent you here to add source material the agents can use in the next turn."}
+                  </p>
+                </div>
+              ) : null}
+
+              <div
+                ref={integrationsSectionRef}
+                className={`panel-section ${governanceFocus === "integrations" ? "panel-section-spotlight" : ""}`}
+              >
               <h2>Integrations + Permissions</h2>
               <div className="card">
                 <h3>GitHub Workspace</h3>
@@ -2351,6 +1830,67 @@ export default function Dashboard({ session }: { session: Session }) {
                   </button>
                 </div>
               ) : null}
+              </div>
+
+              <div
+                ref={knowledgeSectionRef}
+                className={`panel-section ${governanceFocus === "knowledge" ? "panel-section-spotlight" : ""}`}
+              >
+                <h2>Workspace Knowledge</h2>
+                <div className="card">
+                  <h3>Add Reference Material</h3>
+                  <div className="panel-row wrap">
+                    <label className="btn" htmlFor="governance-knowledge-file">
+                      Upload File
+                    </label>
+                    <input
+                      id="governance-knowledge-file"
+                      className="visually-hidden"
+                      onChange={(event) => void uploadKnowledgeFileFromGovernance(event)}
+                      type="file"
+                    />
+                  </div>
+                  <label className="meta">Note Title</label>
+                  <input
+                    className="input"
+                    value={knowledgeNoteTitle}
+                    onChange={(event) => setKnowledgeNoteTitle(event.target.value)}
+                  />
+                  <label className="meta">Note Content</label>
+                  <textarea
+                    className="textarea"
+                    placeholder="Paste specs, diffs, constraints, or review context here..."
+                    value={knowledgeNoteContent}
+                    onChange={(event) => setKnowledgeNoteContent(event.target.value)}
+                  />
+                  <button className="btn btn-accent" disabled={busy || !knowledgeNoteContent.trim()} onClick={createKnowledgeNoteFromGovernance} type="button">
+                    Save Workspace Note
+                  </button>
+                </div>
+
+                <div className="card">
+                  <h3>Current Sources</h3>
+                  <ul className="list compact-list">
+                    {knowledgeSources.length ? (
+                      knowledgeSources.slice(0, 12).map((source) => (
+                        <li className="card" key={source.id}>
+                          <div>
+                            <strong>{source.type}</strong> | {source._count?.chunks ?? 0} chunks
+                          </div>
+                          <div>{source.title}</div>
+                          {source.sourceUrl ? <div className="meta">{source.sourceUrl}</div> : null}
+                          <div className="meta">{new Date(source.updatedAt).toLocaleString()}</div>
+                          <button className="btn btn-danger ghost" disabled={busy} onClick={() => deleteKnowledgeSource(source.id)} type="button">
+                            Delete
+                          </button>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="meta">No workspace knowledge sources yet.</li>
+                    )}
+                  </ul>
+                </div>
+              </div>
             </div>
 
             <div className="stack-column">

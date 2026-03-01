@@ -7,7 +7,17 @@ import { WebSocket, WebSocketServer } from "ws";
 import { createToolAdapter } from "@second-space/tool-adapters";
 import { getWaypoint, tickAgents, waypointForTaskStatus } from "@second-space/sim-engine";
 import { applyTaskCompletionProgress, type SpecialistRole } from "@second-space/shared-types";
-import type { AgentState, IntegrationCapability, MemoryEventType, RealtimeEvent } from "@second-space/shared-types";
+import type {
+  AgentState,
+  IntegrationCapability,
+  MemoryEventType,
+  PresentationChannel,
+  PresentationSceneEvent,
+  PresentationScenePatch,
+  PresentationTokenPayload,
+  RealtimeEvent
+} from "@second-space/shared-types";
+import { verifyPresentationToken } from "@second-space/shared-types/token-signing";
 import type { WaypointName } from "@second-space/sim-engine";
 import {
   buildContractPrompt,
@@ -17,6 +27,7 @@ import {
   recordMemoryEvent
 } from "./learning/memory";
 import { runReflectionCycle } from "./learning/reflection";
+import { buildPresentationPatchForEvent, resolveWorkspaceIdForRealtimeEvent } from "./presentation/events";
 
 const prisma = new PrismaClient();
 const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
@@ -34,6 +45,7 @@ const wss = new WebSocketServer({ port: wsPort });
 const taskQueue = new Queue(TASK_EXECUTION_QUEUE, {
   connection: new Redis(redisUrl, { maxRetriesPerRequest: null, enableReadyCheck: false })
 });
+const socketContexts = new WeakMap<WebSocket, PresentationTokenPayload>();
 
 const ambientWaypointPool: WaypointName[] = [
   "directorDesk",
@@ -69,13 +81,70 @@ function idleStateForWaypoint(waypoint: WaypointName): AgentState {
   return "WORKING";
 }
 
-function broadcast(event: RealtimeEvent) {
+function getSessionSecret(): string {
+  if (process.env.SESSION_SECRET?.trim()) {
+    return process.env.SESSION_SECRET.trim();
+  }
+
+  if (process.env.NODE_ENV !== "production") {
+    return "second-space-development-session-secret";
+  }
+
+  throw new Error("SESSION_SECRET is required");
+}
+
+function parsePresentationToken(requestUrl: string | undefined): string | undefined {
+  if (!requestUrl) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(requestUrl, `ws://localhost:${wsPort}`);
+    return url.searchParams.get("token") ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getSocketContext(socket: WebSocket): PresentationTokenPayload | null {
+  return socketContexts.get(socket) ?? null;
+}
+
+function broadcastScopedEvent(event: RealtimeEvent, workspaceId: string) {
   const payload = JSON.stringify(event);
 
   for (const client of wss.clients) {
+    const context = getSocketContext(client as WebSocket);
+    if (!context || context.workspaceId !== workspaceId) {
+      continue;
+    }
+
     if (client.readyState === WebSocket.OPEN) {
       client.send(payload);
     }
+  }
+}
+
+function broadcastPresentationPatch(workspaceId: string, changes: PresentationScenePatch) {
+  const emittedAt = new Date().toISOString();
+
+  for (const client of wss.clients) {
+    const context = getSocketContext(client as WebSocket);
+    if (!context || context.workspaceId !== workspaceId || client.readyState !== WebSocket.OPEN) {
+      continue;
+    }
+
+    const event: PresentationSceneEvent = {
+      type: "presentation.scene.patch",
+      payload: {
+        workspaceId,
+        channel: context.channel as PresentationChannel,
+        changes
+      },
+      emittedAt
+    };
+
+    client.send(JSON.stringify(event));
   }
 }
 
@@ -107,6 +176,7 @@ async function appendTaskEvent(
   });
 
   await publish("feed.event", {
+    workspaceId,
     id: `${taskId}:${type}:${Date.now()}`,
     message,
     category: "TASK",
@@ -322,6 +392,7 @@ async function placeSecurityHold(input: {
   });
 
   await publish("feed.event", {
+    workspaceId: hold.workspaceId,
     id: `${hold.id}:security-hold`,
     message: `Security hold placed: ${hold.reason}`,
     category: "APPROVAL",
@@ -494,12 +565,14 @@ async function ensureApprovalForWriteActions(taskId: string): Promise<"READY" | 
     });
 
     await publish("approval.requested", {
+      workspaceId: task.workspaceId,
       approvalId: approval.id,
       taskId: task.id,
       status: "PENDING"
     });
 
     await publish("task.updated", {
+      workspaceId: task.workspaceId,
       taskId: task.id,
       status: "PENDING_APPROVAL",
       assigneeId: task.assigneeId,
@@ -566,6 +639,7 @@ async function processTask(taskId: string) {
         holdId: activeHold.id
       });
       await publish("task.updated", {
+        workspaceId: task.workspaceId,
         taskId: task.id,
         status: "BLOCKED",
         assigneeId: task.assigneeId,
@@ -590,6 +664,7 @@ async function processTask(taskId: string) {
       reason: securityViolation.reason
     });
     await publish("task.updated", {
+      workspaceId: task.workspaceId,
       taskId: task.id,
       status: "BLOCKED",
       assigneeId: task.assigneeId,
@@ -614,6 +689,7 @@ async function processTask(taskId: string) {
 
     await appendTaskEvent(task.workspaceId, taskId, "TASK_STATUS", "Task moved to IN_PROGRESS", { status: "IN_PROGRESS" });
     await publish("task.updated", {
+      workspaceId: task.workspaceId,
       taskId,
       status: "IN_PROGRESS",
       assigneeId: task.assigneeId,
@@ -635,6 +711,7 @@ async function processTask(taskId: string) {
     });
     await appendTaskEvent(task.workspaceId, taskId, "TASK_FAILED", "No tool binding found for task assignee");
     await publish("task.updated", {
+      workspaceId: task.workspaceId,
       taskId,
       status: "FAILED",
       assigneeId: task.assigneeId,
@@ -674,6 +751,7 @@ async function processTask(taskId: string) {
           provider
         });
         await publish("task.updated", {
+          workspaceId: task.workspaceId,
           taskId,
           status: "BLOCKED",
           assigneeId: task.assigneeId,
@@ -720,6 +798,7 @@ async function processTask(taskId: string) {
         );
 
         await publish("task.updated", {
+          workspaceId: task.workspaceId,
           taskId,
           status: "BLOCKED",
           assigneeId: task.assigneeId,
@@ -833,6 +912,7 @@ async function processTask(taskId: string) {
     });
 
     await publish("task.updated", {
+      workspaceId: task.workspaceId,
       taskId,
       status: "FAILED",
       assigneeId: task.assigneeId,
@@ -902,6 +982,7 @@ async function processTask(taskId: string) {
   });
 
   await publish("task.updated", {
+    workspaceId: task.workspaceId,
     taskId,
     status: "DONE",
     assigneeId: task.assigneeId,
@@ -909,11 +990,13 @@ async function processTask(taskId: string) {
   });
 
   await publish("sim.agent.state.updated", {
+    workspaceId: task.workspaceId,
     agentId: task.assigneeId,
     state: "IDLE"
   });
 
   await publish("feed.event", {
+    workspaceId: task.workspaceId,
     id: `${task.id}:done`,
     message: `${task.title} completed by ${task.assignee.name}`,
     category: "TASK",
@@ -1077,6 +1160,7 @@ async function scheduleTick() {
     });
 
     await publish("task.created", {
+      workspaceId: schedule.workspaceId,
       taskId: task.id,
       status: task.status,
       assigneeId: task.assigneeId,
@@ -1087,6 +1171,7 @@ async function scheduleTick() {
       await taskQueue.add("execute-task", { taskId: task.id });
     } else {
       await publish("approval.requested", {
+        workspaceId: schedule.workspaceId,
         approvalId: `task:${task.id}`,
         taskId: task.id,
         status: "PENDING"
@@ -1235,12 +1320,14 @@ async function simulationTick() {
     });
 
     await publish("sim.agent.position.updated", {
+      workspaceId: existingAgent.workspaceId,
       agentId: steppedAgent.id,
       x: Number(steppedAgent.x.toFixed(2)),
       y: Number(steppedAgent.y.toFixed(2))
     });
 
     await publish("sim.agent.state.updated", {
+      workspaceId: existingAgent.workspaceId,
       agentId: steppedAgent.id,
       state: mappedState
     });
@@ -1248,15 +1335,23 @@ async function simulationTick() {
 }
 
 async function main() {
-  wss.on("connection", (socket) => {
+  wss.on("connection", (socket, request) => {
+    const token = parsePresentationToken(request.url);
+    const context = verifyPresentationToken(token, getSessionSecret());
+
+    if (!context) {
+      socket.close(4001, "Unauthorized");
+      return;
+    }
+
+    socketContexts.set(socket, context);
+
     socket.send(
       JSON.stringify({
-        type: "feed.event",
+        type: "presentation.session.ready",
         payload: {
-          id: `system:${Date.now()}`,
-          message: "Realtime link established",
-          category: "SYSTEM",
-          createdAt: new Date().toISOString()
+          workspaceId: context.workspaceId,
+          channel: context.channel
         },
         emittedAt: new Date().toISOString()
       })
@@ -1265,12 +1360,25 @@ async function main() {
 
   await redisSub.subscribe(REALTIME_CHANNEL);
   redisSub.on("message", (_channel, message) => {
-    try {
-      const event = JSON.parse(message) as RealtimeEvent;
-      broadcast(event);
-    } catch {
-      // Ignore malformed events.
-    }
+    void (async () => {
+      try {
+        const event = JSON.parse(message) as RealtimeEvent;
+        const workspaceId = await resolveWorkspaceIdForRealtimeEvent(prisma, event);
+
+        if (!workspaceId) {
+          return;
+        }
+
+        broadcastScopedEvent(event, workspaceId);
+
+        const patch = await buildPresentationPatchForEvent(prisma, workspaceId, event);
+        if (patch) {
+          broadcastPresentationPatch(workspaceId, patch);
+        }
+      } catch {
+        // Ignore malformed realtime payloads.
+      }
+    })();
   });
 
   const worker = new Worker(

@@ -2,12 +2,14 @@ import type { AgentState } from "@second-space/shared-types";
 import {
   WORKSPACE_SCENE_INCLUDES,
   WORKSPACE_SCENE_VIEWS,
+  WORKSPACE_SCENE_ZONES,
   type WorkspaceSceneAgent,
   type WorkspaceSceneInclude,
   type WorkspaceSceneStatusTone,
   type WorkspaceSceneSummary,
   type WorkspaceSceneView,
-  type WorkspaceSceneZone
+  type WorkspaceSceneZone,
+  type WorkspaceSceneZoneOccupancy
 } from "@second-space/shared-types";
 import { OFFICE_WAYPOINTS } from "@second-space/sim-engine";
 
@@ -80,6 +82,23 @@ export function resolveSceneZone(x: number | null | undefined, y: number | null 
   }
 
   return nearestZone;
+}
+
+export function buildZoneOccupancy(
+  agents: Array<Pick<WorkspaceSceneAgent, "id" | "zone" | "state">>
+): WorkspaceSceneZoneOccupancy[] {
+  return WORKSPACE_SCENE_ZONES.map((zone) => {
+    const zoneAgents = agents.filter((agent) => agent.zone === zone);
+
+    return {
+      zone,
+      count: zoneAgents.length,
+      agentIds: zoneAgents.map((agent) => agent.id),
+      blockedCount: zoneAgents.filter((agent) => agent.state === "BLOCKED").length,
+      workingCount: zoneAgents.filter((agent) => agent.state === "WORKING").length,
+      meetingCount: zoneAgents.filter((agent) => agent.state === "MEETING").length
+    };
+  });
 }
 
 export function buildSceneSummary(

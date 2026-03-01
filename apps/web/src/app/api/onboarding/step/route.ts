@@ -66,6 +66,7 @@ export async function POST(request: NextRequest) {
     });
 
     await publishRealtimeEvent("feed.event", {
+      workspaceId: session.workspaceId,
       id: `${session.workspaceId}:onboarding:${body.step}`,
       message: `Onboarding step completed: ${body.step}`,
       category: "SYSTEM",
