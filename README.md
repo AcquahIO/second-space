@@ -95,3 +95,5 @@ npm run dev
 - `docs/ue5-sprint-0-kickoff.md`
 - `docs/ue5-sprint-0-task-board.md`
 - `docs/ue5-sprint-0-backlog.md`
+- `docs/ue5-sprint-0-github-issues.md`
+- `docs/ue5-project-structure.md`

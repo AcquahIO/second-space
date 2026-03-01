@@ -1,0 +1,12 @@
+node_modules
+.npm
+.next
+.turbo
+dist
+coverage
+.env
+.env.local
+*.log
+.DS_Store
+prisma/migrations
+apps/web/prisma/migrations

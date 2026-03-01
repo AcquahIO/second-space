@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: second-space-postgres
+    environment:
+      POSTGRES_DB: second_space
+      POSTGRES_USER: secondspace
+      POSTGRES_PASSWORD: secondspace
+    ports:
+      - "5432:5432"
+    volumes:
+      - second-space-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U secondspace -d second_space"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: second-space-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  worker:
+    build:
+      context: ..
+      dockerfile: apps/worker/Dockerfile
+    container_name: second-space-worker
+    environment:
+      DATABASE_URL: postgresql://secondspace:secondspace@postgres:5432/second_space
+      REDIS_URL: redis://redis:6379
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      WORKER_PORT: 4001
+      SIM_TICK_MS: 1000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "4001:4001"
+    command: ["sh", "-c", "npm run db:generate && npm run db:migrate && npm run db:seed && npm run dev --workspace=@second-space/worker"]
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+    container_name: second-space-web
+    environment:
+      DATABASE_URL: postgresql://secondspace:secondspace@postgres:5432/second_space
+      REDIS_URL: redis://redis:6379
+      SESSION_SECRET: ${SESSION_SECRET:-replace-with-long-random-secret}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@secondspace.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:4001}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      PORT: 3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    ports:
+      - "3000:3000"
+    command: ["sh", "-c", "npm run db:generate && npm run dev --workspace=@second-space/web"]
+
+volumes:
+  second-space-postgres-data:

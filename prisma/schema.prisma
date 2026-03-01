@@ -1,0 +1,672 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AgentRole {
+  DIRECTOR
+  MANAGER
+  SPECIALIST
+}
+
+enum SpecialistRole {
+  PROJECT_MANAGER
+  TECH_LEAD
+  SOFTWARE_ENGINEER
+  QA_TESTER
+  DEVOPS_ENGINEER
+  SECURITY_AGENT
+  CONTENT_AGENT
+  MARKETING_AGENT
+  FINANCE_AGENT
+  CUSTOMER_SUPPORT_AGENT
+  OPERATIONS_LOGISTICS_AGENT
+}
+
+enum AgentState {
+  IDLE
+  MOVING
+  WORKING
+  MEETING
+  BLOCKED
+}
+
+enum TaskStatus {
+  DRAFT
+  QUEUED
+  ASSIGNED
+  IN_PROGRESS
+  BLOCKED
+  PENDING_APPROVAL
+  DONE
+  FAILED
+  CANCELLED
+}
+
+enum ExecutionMode {
+  REAL
+  MOCK
+}
+
+enum ApprovalType {
+  EXTERNAL_ACTION
+  HIGH_RISK_ACTION
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum Mood {
+  FOCUSED
+  NEUTRAL
+  STRESSED
+}
+
+enum WorkspaceOnboardingState {
+  WORKSPACE_SETUP
+  SUBSCRIPTION_ACTIVE
+  KNOWLEDGE_IMPORT
+  INTEGRATIONS_CONNECTED
+  AGENTS_HIRED
+  PERMISSIONS_REVIEWED
+  LAUNCHED
+}
+
+enum WorkspaceSubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+enum IntegrationProvider {
+  GITHUB
+  LINKEDIN
+  GMAIL
+}
+
+enum IntegrationAuthStatus {
+  DISCONNECTED
+  CONNECTED
+  ERROR
+}
+
+enum IntegrationCapability {
+  READ
+  WRITE
+  POST
+  SEND
+  COMMIT
+  PUSH
+}
+
+enum KnowledgeSourceType {
+  FILE
+  URL
+  NOTE
+}
+
+enum SecurityHoldScope {
+  TASK
+  WORKSPACE
+}
+
+enum SecurityHoldStatus {
+  ACTIVE
+  RELEASED
+}
+
+enum RiskSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum SecurityHoldSource {
+  AUTO_POLICY
+  MANUAL
+}
+
+enum UserContextType {
+  GOAL
+  PREFERENCE
+  STRENGTH
+  WEAKNESS
+  BUSINESS_CONTEXT
+  PRODUCT_CONTEXT
+  WORKING_STYLE
+}
+
+enum MemoryEventType {
+  TASK_CREATED
+  TASK_UPDATED
+  TASK_COMPLETED
+  TASK_FAILED
+  APPROVAL_REQUESTED
+  APPROVAL_RESOLVED
+  TASK_HANDOFF
+  CHAT_DIRECTIVE
+  INTEGRATION_FAILURE
+  SECURITY_HOLD
+  REFLECTION_NOTE
+}
+
+enum ReflectionRunStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum ContractProposalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Workspace {
+  id                      String                   @id @default(cuid())
+  name                    String
+  slug                    String                   @unique
+  onboardingState         WorkspaceOnboardingState @default(WORKSPACE_SETUP)
+  onboardingCompletedAt   DateTime?
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  users                   User[]
+  agents                  Agent[]
+  agentMemories           AgentMemory[]
+  agentStats              AgentStats[]
+  tools                   Tool[]
+  tasks                   Task[]
+  taskDependencies        TaskDependency[]
+  approvals               Approval[]
+  taskEvents              TaskEvent[]
+  conversations           Conversation[]
+  messages                Message[]
+  commandDrafts           CommandDraft[]
+  auditLogs               AuditLog[]
+  simPositions            SimPosition[]
+  knowledgeSources        KnowledgeSource[]
+  knowledgeChunks         KnowledgeChunk[]
+  integrations            WorkspaceIntegration[]
+  schedules               Schedule[]
+  subscription            WorkspaceSubscription?
+  onboardingProgress      WorkspaceOnboardingStep[]
+  userContexts            UserContext[]
+  memoryEvents            MemoryEvent[]
+  securityHolds           SecurityHold[]
+  learningReflectionRuns  LearningReflectionRun[]
+  contractProposals       ContractProposal[]
+}
+
+model WorkspaceSubscription {
+  id                   String                      @id @default(cuid())
+  workspaceId          String                      @unique
+  status               WorkspaceSubscriptionStatus @default(TRIALING)
+  stripeCustomerId     String?                     @unique
+  stripeSubscriptionId String?                     @unique
+  stripePriceId        String?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean                     @default(false)
+  createdAt            DateTime                    @default(now())
+  updatedAt            DateTime                    @updatedAt
+  workspace            Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model WorkspaceOnboardingStep {
+  id          String                   @id @default(cuid())
+  workspaceId String
+  step        WorkspaceOnboardingState
+  completedAt DateTime                 @default(now())
+  workspace   Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, step])
+  @@index([workspaceId, completedAt])
+}
+
+model User {
+  id               String     @id @default(cuid())
+  workspaceId      String
+  email            String     @unique
+  passwordHash     String
+  role             String
+  isWorkspaceOwner Boolean    @default(false)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  workspace        Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  approvals        Approval[]
+  auditLogs        AuditLog[]
+  createdUserContexts UserContext[] @relation("UserContextCreatedBy")
+  releasedSecurityHolds SecurityHold[] @relation("SecurityHoldReleasedBy")
+  resolvedContractProposals ContractProposal[] @relation("ContractProposalResolvedBy")
+
+  @@index([workspaceId])
+}
+
+model Agent {
+  id                        String                     @id @default(cuid())
+  workspaceId               String
+  name                      String
+  role                      AgentRole
+  specialistRole            SpecialistRole
+  specialty                 String
+  managerId                 String?
+  state                     AgentState                 @default(IDLE)
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  workspace                 Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  manager                   Agent?                     @relation("AgentHierarchy", fields: [managerId], references: [id])
+  reports                   Agent[]                    @relation("AgentHierarchy")
+  tasks                     Task[]                     @relation("TaskAssignee")
+  createdTasks              Task[]                     @relation("TaskCreator")
+  stats                     AgentStats?
+  tools                     AgentTool[]
+  simPosition               SimPosition?
+  memories                  AgentMemory[]
+  sentMessages              Message[]                  @relation("MessageSender")
+  receivedMessages          Message[]                  @relation("MessageRecipient")
+  integrationPermissions    AgentIntegrationPermission[]
+  schedules                 Schedule[]
+  createdSecurityHolds      SecurityHold[]              @relation("SecurityHoldCreatedBy")
+  memoryEvents              MemoryEvent[]
+  reflectionRuns            LearningReflectionRun[]
+  contractProposals         ContractProposal[]
+
+  @@index([workspaceId, role, name])
+  @@index([workspaceId, specialistRole])
+}
+
+model AgentMemory {
+  id          String    @id @default(cuid())
+  workspaceId String
+  agentId     String
+  content     String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  agent       Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, agentId, updatedAt])
+}
+
+model AgentStats {
+  id          String    @id @default(cuid())
+  workspaceId String
+  agentId     String    @unique
+  xp          Int       @default(0)
+  level       Int       @default(1)
+  mood        Mood      @default(NEUTRAL)
+  badges      Json?
+  streak      Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  agent       Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, level])
+}
+
+model Tool {
+  id            String        @id @default(cuid())
+  workspaceId   String
+  name          String
+  provider      String
+  executionMode ExecutionMode @default(MOCK)
+  config        Json?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  workspace     Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  agents        AgentTool[]
+
+  @@unique([workspaceId, provider])
+  @@index([workspaceId, name])
+}
+
+model AgentTool {
+  id        String   @id @default(cuid())
+  agentId   String
+  toolId    String
+  createdAt DateTime @default(now())
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  tool      Tool     @relation(fields: [toolId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, toolId])
+}
+
+model Task {
+  id               String           @id @default(cuid())
+  workspaceId      String
+  title            String
+  description      String
+  status           TaskStatus       @default(DRAFT)
+  assigneeId       String
+  createdById      String
+  parentTaskId     String?
+  requiresApproval Boolean          @default(false)
+  externalAction   Boolean          @default(false)
+  toolName         String?
+  metadata         Json?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assignee         Agent            @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  createdBy        Agent            @relation("TaskCreator", fields: [createdById], references: [id])
+  parentTask       Task?            @relation("TaskHierarchy", fields: [parentTaskId], references: [id])
+  childTasks       Task[]           @relation("TaskHierarchy")
+  dependencies     TaskDependency[] @relation("TaskDependsOn")
+  requiredBy       TaskDependency[] @relation("TaskRequiredBy")
+  events           TaskEvent[]
+  approvals        Approval[]
+  conversation     Conversation?
+  securityHolds    SecurityHold[]
+  memoryEvents     MemoryEvent[]
+
+  @@index([workspaceId, status, createdAt])
+  @@index([workspaceId, assigneeId])
+}
+
+model TaskDependency {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  taskId          String
+  dependsOnTaskId String
+  createdAt       DateTime  @default(now())
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  task            Task      @relation("TaskDependsOn", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOnTask   Task      @relation("TaskRequiredBy", fields: [dependsOnTaskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, dependsOnTaskId])
+}
+
+model TaskEvent {
+  id          String    @id @default(cuid())
+  workspaceId String
+  taskId       String
+  type        String
+  message     String
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  task        Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+}
+
+model Approval {
+  id           String         @id @default(cuid())
+  workspaceId  String
+  taskId       String
+  type         ApprovalType
+  status       ApprovalStatus @default(PENDING)
+  reason       String
+  resolvedById String?
+  resolvedAt   DateTime?
+  createdAt    DateTime       @default(now())
+  workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  task         Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  resolvedBy   User?          @relation(fields: [resolvedById], references: [id])
+
+  @@index([workspaceId, status, createdAt])
+}
+
+model Conversation {
+  id          String    @id @default(cuid())
+  workspaceId String
+  taskId      String    @unique
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  task        Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  messages    Message[]
+}
+
+model Message {
+  id               String        @id @default(cuid())
+  workspaceId      String
+  conversationId   String
+  senderAgentId    String?
+  recipientAgentId String?
+  role             String
+  content          String
+  createdAt        DateTime      @default(now())
+  workspace        Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  conversation     Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderAgent      Agent?        @relation("MessageSender", fields: [senderAgentId], references: [id])
+  recipientAgent   Agent?        @relation("MessageRecipient", fields: [recipientAgentId], references: [id])
+
+  @@index([workspaceId, createdAt])
+}
+
+model SimPosition {
+  id          String    @id @default(cuid())
+  workspaceId String
+  agentId     String    @unique
+  x           Float
+  y           Float
+  state       AgentState
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  agent       Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, updatedAt])
+}
+
+model AuditLog {
+  id          String    @id @default(cuid())
+  workspaceId String
+  userId      String?
+  action      String
+  target      String
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User?     @relation(fields: [userId], references: [id])
+
+  @@index([workspaceId, createdAt])
+}
+
+model CommandDraft {
+  id            String    @id @default(cuid())
+  workspaceId   String
+  rawText       String
+  intent        String
+  mode          String    @default("execute")
+  proposedTasks Json
+  createdAt     DateTime  @default(now())
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+}
+
+model WorkspaceIntegration {
+  id                   String                @id @default(cuid())
+  workspaceId          String
+  provider             IntegrationProvider
+  authStatus           IntegrationAuthStatus @default(DISCONNECTED)
+  accountLabel         String?
+  accessTokenEncrypted String?
+  refreshTokenEncrypted String?
+  expiresAt            DateTime?
+  tokenMetadata        Json?
+  capabilities         IntegrationCapability[]
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  workspace            Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  agentPermissions     AgentIntegrationPermission[]
+
+  @@unique([workspaceId, provider])
+  @@index([workspaceId, authStatus])
+}
+
+model AgentIntegrationPermission {
+  id                     String                 @id @default(cuid())
+  workspaceIntegrationId String
+  agentId                String
+  capabilities           IntegrationCapability[]
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  workspaceIntegration   WorkspaceIntegration   @relation(fields: [workspaceIntegrationId], references: [id], onDelete: Cascade)
+  agent                  Agent                  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceIntegrationId, agentId])
+}
+
+model KnowledgeSource {
+  id          String              @id @default(cuid())
+  workspaceId String
+  type        KnowledgeSourceType
+  title       String
+  sourceUrl   String?
+  filePath    String?
+  rawContent  String
+  metadata    Json?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  chunks      KnowledgeChunk[]
+
+  @@index([workspaceId, type, createdAt])
+}
+
+model KnowledgeChunk {
+  id          String    @id @default(cuid())
+  workspaceId String
+  sourceId    String
+  chunkIndex  Int
+  content     String
+  embedding   Json?
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  source      KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, chunkIndex])
+  @@index([workspaceId, createdAt])
+}
+
+model Schedule {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  leadAgentId     String?
+  name            String
+  prompt          String
+  naturalLanguage String
+  recurrence      String
+  timezone        String
+  enabled         Boolean   @default(true)
+  nextRunAt       DateTime?
+  lastRunAt       DateTime?
+  metadata        Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  leadAgent       Agent?    @relation(fields: [leadAgentId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, enabled, nextRunAt])
+}
+
+model UserContext {
+  id              String          @id @default(cuid())
+  workspaceId     String
+  type            UserContextType
+  title           String
+  content         String
+  weight          Int             @default(50)
+  createdByUserId String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  workspace       Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy       User?           @relation("UserContextCreatedBy", fields: [createdByUserId], references: [id])
+
+  @@index([workspaceId, type, createdAt])
+}
+
+model MemoryEvent {
+  id          String          @id @default(cuid())
+  workspaceId String
+  agentId     String?
+  taskId      String?
+  eventType   MemoryEventType
+  content     String
+  metadata    Json?
+  redacted    Boolean         @default(false)
+  createdAt   DateTime        @default(now())
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  agent       Agent?          @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  task        Task?           @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, eventType, createdAt])
+  @@index([workspaceId, agentId, createdAt])
+  @@index([workspaceId, taskId, createdAt])
+}
+
+model SecurityHold {
+  id               String             @id @default(cuid())
+  workspaceId      String
+  taskId           String?
+  scope            SecurityHoldScope
+  severity         RiskSeverity
+  source           SecurityHoldSource @default(AUTO_POLICY)
+  status           SecurityHoldStatus @default(ACTIVE)
+  reason           String
+  metadata         Json?
+  createdByAgentId String?
+  releasedByUserId String?
+  releasedAt       DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  workspace        Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  task             Task?              @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  createdByAgent   Agent?             @relation("SecurityHoldCreatedBy", fields: [createdByAgentId], references: [id], onDelete: SetNull)
+  releasedByUser   User?              @relation("SecurityHoldReleasedBy", fields: [releasedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, status, createdAt])
+  @@index([workspaceId, taskId, status])
+}
+
+model LearningReflectionRun {
+  id                String              @id @default(cuid())
+  workspaceId       String
+  agentId           String?
+  status            ReflectionRunStatus @default(PENDING)
+  summary           String              @default("")
+  analyzedEventCount Int                @default(0)
+  metadata          Json?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  workspace         Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  agent             Agent?              @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  proposals         ContractProposal[]
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, status, createdAt])
+}
+
+model ContractProposal {
+  id               String                 @id @default(cuid())
+  workspaceId      String
+  agentId          String?
+  status           ContractProposalStatus @default(PENDING)
+  title            String
+  rationale        String
+  currentContract  Json
+  proposedContract Json
+  proposedByRunId  String?
+  resolvedByUserId String?
+  resolvedAt       DateTime?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  workspace        Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  agent            Agent?                 @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  proposedByRun    LearningReflectionRun? @relation(fields: [proposedByRunId], references: [id], onDelete: SetNull)
+  resolvedByUser   User?                  @relation("ContractProposalResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, status, createdAt])
+  @@index([workspaceId, agentId, createdAt])
+}

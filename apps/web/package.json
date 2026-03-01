@@ -1,0 +1,36 @@
+{
+  "name": "@second-space/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev -p ${PORT:-3000}",
+    "build": "next build",
+    "start": "next start -p ${PORT:-3000}",
+    "test": "vitest run",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "@second-space/shared-types": "0.1.0",
+    "@second-space/sim-engine": "0.1.0",
+    "bcryptjs": "^2.4.3",
+    "bullmq": "^5.34.4",
+    "ioredis": "^5.4.2",
+    "next": "^14.2.20",
+    "openai": "^4.76.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.179.1",
+    "uuid": "^11.0.3",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@types/three": "^0.182.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

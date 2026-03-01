@@ -1,0 +1,40 @@
+:root {
+  --bg-deep: #111319;
+  --bg-mid: #191f2e;
+  --bg-soft: #253145;
+  --panel: #1a2130;
+  --panel-alt: #202b3c;
+  --ink: #edf3ff;
+  --ink-dim: #a9b7cf;
+  --accent: #5ce1c2;
+  --accent-2: #ffcf5a;
+  --danger: #ff6f7d;
+  --ok: #5ce18a;
+  --pixel: "Press Start 2P", "VT323", "Courier New", monospace;
+  --ui: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background:
+    radial-gradient(circle at 20% 10%, #2a3952 0%, transparent 40%),
+    radial-gradient(circle at 90% 80%, #253730 0%, transparent 35%),
+    linear-gradient(140deg, var(--bg-deep), var(--bg-mid));
+  color: var(--ink);
+  font-family: var(--ui);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
